@@ -2,6 +2,9 @@ import os
 import random
 import time
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -619,7 +622,7 @@ def run_experiment():
     t_max = 60
     q = 0.95
     K = 100
-    num_iter = 1 #TODO: FIX
+    num_iter = 3 #TODO: FIX
     max_steps = 1000
     delta = 0.05
     gamma = (0.00001/beta0)**(1/num_iter)
@@ -742,10 +745,6 @@ def random_walk(state, steps, seed=44):
         action = random.choice(actions)
         current_state = puzzle.apply_move(current_state, action)
     return current_state
-
-import pandas as pd
-import time
-import numpy as np
 
 def run_tests(trained_ffnn, trained_wunn, alphas_test, optimal_cost=53.05):
     # Define the goal state
@@ -914,9 +913,138 @@ trained_ffnn, trained_wunn = run_experiment()
 #alphas_test = [0.95, 0.9, 0.75, 0.5, 0.25, 0.1, 0.05]
 alphas_test = [0.95, 0.05]
 
-average_results = average_results(trained_ffnn, trained_wunn, alphas_test, repeats=2)
+average_results = average_results(trained_ffnn,
+                                  trained_wunn,
+                                  alphas_test,
+                                  repeats=2)
 
 print(average_results)
 
 # Save results
-average_results.to_csv('paper_table_1_results.csv', index=False)
+average_results.to_csv('paper_table_1_results.csv',
+                       index=False)
+
+# Plots
+
+def plot_training_logs(kappa):
+
+    ffnn_log_path = f'logs/ffnn_loss_log_kappa_{kappa}.txt'
+    wunn_log_path = f'logs/wunn_loss_log_kappa_{kappa}.txt'
+    epistemic_path = f'data/epistemic_uncertainty_log_kappa_{kappa}.txt'
+    aleatoric_path = f'data/wunn_aleatoric_uncertainty_log_kappa_{kappa}.txt'
+    predicted_cost_path = f'data/ffnn_prediction_log_kappa_{kappa}.txt'
+    kappa = 1.5
+
+    ffnn_data = pd.read_csv(ffnn_log_path, delimiter=':', header=None, names=['Metric', 'Value'])
+    wunn_data = pd.read_csv(wunn_log_path, delimiter=':', header=None, names=['Metric', 'Value'])
+
+    # Extract iteration data
+    ffnn_iterations = ffnn_data[ffnn_data['Metric'].str.contains('Iteration')].index.tolist()
+    wunn_iterations = wunn_data[wunn_data['Metric'].str.contains('Iteration')].index.tolist()
+
+    # Plot FFNN Loss per iteration
+    for i in range(len(ffnn_iterations)):
+        start_idx = ffnn_iterations[i]
+        end_idx = ffnn_iterations[i + 1] if i + 1 < len(ffnn_iterations) else len(ffnn_data)
+        epoch_data = ffnn_data.iloc[start_idx + 1:end_idx]
+
+        epoch_data = epoch_data[epoch_data['Metric'].str.contains('Loss')].reset_index(drop=True)
+        epoch_data['Epoch'] = epoch_data.index + 1
+
+        plt.figure()
+        sns.lineplot(data=epoch_data, x='Epoch', y='Value')
+        plt.title(f'FFNN Training Loss Iteration {i + 1}')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.savefig(f'plots/ffnn_loss_iteration_{i + 1}_kappa_{kappa}.png')
+        plt.close()
+
+    # Plot WUNN Loss per iteration
+    for i in range(len(wunn_iterations)):
+        start_idx = wunn_iterations[i]
+        end_idx = wunn_iterations[i + 1] if i + 1 < len(wunn_iterations) else len(wunn_data)
+        epoch_data = wunn_data.iloc[start_idx + 1:end_idx]
+
+        epoch_data = epoch_data[epoch_data['Metric'].str.contains('Loss')].reset_index(drop=True)
+        epoch_data['Epoch'] = epoch_data.index + 1
+
+        plt.figure()
+        sns.lineplot(data=epoch_data, x='Epoch', y='Value')
+        plt.title(f'WUNN Training Loss Iteration {i + 1}')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.savefig(f'plots/wunn_loss_iteration_{i + 1}_kappa_{kappa}.png')
+        plt.close()
+
+    with open(epistemic_path, 'r') as file:
+        epistemic_lines = file.readlines()
+
+    epistemic_data = []
+    for line in epistemic_lines:
+        if 'Iteration' in line:
+            iteration = int(line.strip().split()[1].split('/')[0])
+        elif 'epistemic uncertainty' in line:
+            uncertainty = float(line.strip().split(': ')[-1])
+            epistemic_data.append({'Iteration': iteration, 'Epistemic Uncertainty': uncertainty})
+
+    epistemic_df = pd.DataFrame(epistemic_data)
+
+    with open(aleatoric_path, 'r') as file:
+        aleatoric_lines = file.readlines()
+
+    aleatoric_data = []
+    for line in aleatoric_lines:
+        if 'Iteration' in line:
+            iteration = int(line.strip().split()[1].split('/')[0])
+        elif 'aleatoric uncertainty' in line:
+            uncertainty = float(line.strip().split(': ')[-1])
+            aleatoric_data.append({'Iteration': iteration, 'Aleatoric Uncertainty': uncertainty})
+
+    aleatoric_df = pd.DataFrame(aleatoric_data)
+
+    with open(predicted_cost_path, 'r') as file:
+        predicted_cost_lines = file.readlines()
+
+    predicted_cost_data = []
+    for line in predicted_cost_lines:
+        if 'Iteration' in line:
+            iteration = int(line.strip().split()[1].split('/')[0])
+        elif 'Predicted cost' in line:
+            cost = float(line.strip().split(': ')[-1])
+            predicted_cost_data.append({'Iteration': iteration, 'Predicted Cost': cost})
+
+    predicted_cost_df = pd.DataFrame(predicted_cost_data)
+
+    # Calculate medians
+    epistemic_median = epistemic_df.groupby('Iteration')['Epistemic Uncertainty'].median().reset_index()
+    aleatoric_median = aleatoric_df.groupby('Iteration')['Aleatoric Uncertainty'].median().reset_index()
+    predicted_cost_median = predicted_cost_df.groupby('Iteration')['Predicted Cost'].median().reset_index()
+
+    # Plotting epistemic uncertainty
+    plt.figure()
+    sns.lineplot(data=epistemic_median, x='Iteration', y='Epistemic Uncertainty', marker='o')
+    plt.title('Median Epistemic Uncertainty by Iteration')
+    plt.xlabel('Iteration')
+    plt.ylabel('Median Epistemic Uncertainty')
+    plt.savefig(f'plots/median_epistemic_uncertainty_by_iteration_kappa_{kappa}.png')
+    plt.show()
+
+    # Plotting aleatoric uncertainty
+    plt.figure()
+    sns.lineplot(data=aleatoric_median, x='Iteration', y='Aleatoric Uncertainty', marker='o')
+    plt.title('Median Aleatoric Uncertainty by Iteration')
+    plt.xlabel('Iteration')
+    plt.ylabel('Median Aleatoric Uncertainty')
+    plt.savefig(f'plots/median_aleatoric_uncertainty_by_iteration_kappa_{kappa}.png')
+    plt.show()
+
+    # Plotting predicted cost
+    plt.figure()
+    sns.lineplot(data=predicted_cost_median, x='Iteration', y='Predicted Cost', marker='o')
+    plt.title('Median Predicted Cost by Iteration')
+    plt.xlabel('Iteration')
+    plt.ylabel('Median Predicted Cost')
+    plt.savefig(f'plots/median_predicted_cost_by_iteration_kappa_{kappa}.png')
+    plt.show()
+
+plot_training_logs(kappa)
