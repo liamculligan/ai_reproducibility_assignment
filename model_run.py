@@ -930,9 +930,9 @@ def plot_training_logs(kappa):
 
     ffnn_log_path = f'logs/ffnn_loss_log_kappa_{kappa}.txt'
     wunn_log_path = f'logs/wunn_loss_log_kappa_{kappa}.txt'
-    epistemic_path = f'data/epistemic_uncertainty_log_kappa_{kappa}.txt'
-    aleatoric_path = f'data/wunn_aleatoric_uncertainty_log_kappa_{kappa}.txt'
-    predicted_cost_path = f'data/ffnn_prediction_log_kappa_{kappa}.txt'
+    epistemic_path = f'logs/epistemic_uncertainty_log_kappa_{kappa}.txt'
+    aleatoric_path = f'logs/wunn_aleatoric_uncertainty_log_kappa_{kappa}.txt'
+    predicted_cost_path = f'logs/ffnn_prediction_log_kappa_{kappa}.txt'
     kappa = 1.5
 
     ffnn_data = pd.read_csv(ffnn_log_path, delimiter=':', header=None, names=['Metric', 'Value'])
