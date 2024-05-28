@@ -23,6 +23,7 @@ epistemic_uncertainty_log_file = os.path.join('logs', f'epistemic_uncertainty_lo
 ffnn_prediction_log_file = os.path.join('logs', f'ffnn_prediction_log_kappa_{kappa}.txt')
 wunn_prediction_log_file = os.path.join('logs', f'wunn_prediction_log_kappa_{kappa}.txt')
 wunn_aleatoric_uncertainty_log_file = os.path.join('logs', f'wunn_aleatoric_uncertainty_log_kappa_{kappa}.txt')
+test_results_log_file = os.path.join('logs', f'test_results_log_kappa_{kappa}.txt')
 
 # Delete log files if they exist
 if os.path.exists(summary_log_file):
@@ -41,11 +42,12 @@ if os.path.exists(wunn_prediction_log_file):
     os.remove(wunn_prediction_log_file)
 if os.path.exists(wunn_aleatoric_uncertainty_log_file):
     os.remove(wunn_aleatoric_uncertainty_log_file)
+if os.path.exists(test_results_log_file):
+    os.remove(test_results_log_file)
 
 def log_to_file(log_file, message):
     with open(log_file, 'a') as f:
         f.write(message + '\n')
-
 
 def log_to_console_and_file(log_file, message):
     print(message)
@@ -639,13 +641,30 @@ def run_experiment():
     sliding_puzzle = SlidingPuzzle(size=4, ffnn=nnFFNN, wunn=nnWUNN)
 
     # Initialise LearnHeuristicPrac
-    learn_heuristic_prac = LearnHeuristicPrac(nnWUNN, nnFFNN, epsilon, max_steps, memory_buffer_max_records, train_iter,
-                                              max_train_iter, mini_batch_size, t_max, q, K, learning_rate_ffnn,
-                                              learning_rate_wunn, alpha_0)
+    learn_heuristic_prac = LearnHeuristicPrac(nnWUNN,
+                                              nnFFNN,
+                                              epsilon,
+                                              max_steps,
+                                              memory_buffer_max_records,
+                                              train_iter,
+                                              max_train_iter,
+                                              mini_batch_size,
+                                              t_max,
+                                              q,
+                                              K,
+                                              learning_rate_ffnn,
+                                              learning_rate_wunn,
+                                              alpha_0)
 
     # Run the learning algorithm
-    trained_ffnn, trained_wunn = learn_heuristic_prac.run(sliding_puzzle, num_iter, num_tasks_per_iter, num_tasks_per_iter_thresh,
-                                            delta, beta0, gamma, kappa)
+    trained_ffnn, trained_wunn = learn_heuristic_prac.run(sliding_puzzle,
+                                                          num_iter,
+                                                          num_tasks_per_iter,
+                                                          num_tasks_per_iter_thresh,
+                                                          delta,
+                                                          beta0,
+                                                          gamma,
+                                                          kappa)
 
     return trained_ffnn, trained_wunn
 
@@ -724,49 +743,180 @@ def random_walk(state, steps, seed=44):
         current_state = puzzle.apply_move(current_state, action)
     return current_state
 
-# Define the goal state
-goal_state = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0]
+import pandas as pd
+import time
+import numpy as np
 
-# Generate puzzles by taking random steps backwards from the goal state
-puzzle_states = [goal_state]
-for steps in range(10, 101, 10):
-    puzzle_states.append(random_walk(goal_state, steps, seed=44))
+def run_tests(trained_ffnn, trained_wunn, alphas_test, optimal_cost=53.05):
+    # Define the goal state
+    goal_state = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0]
 
-for puzzle_state in puzzle_states:
+    def manhattan_distance(state, goal_state):
+        distance = 0
+        size = int(len(state) ** 0.5)
+        for num in range(1, len(state)):
+            current_index = state.index(num)
+            goal_index = goal_state.index(num)
+            current_row, current_col = divmod(current_index, size)
+            goal_row, goal_col = divmod(goal_index, size)
+            distance += abs(current_row - goal_row) + abs(current_col - goal_col)
+        return distance
 
-    print(f'puzzle state: {puzzle_state}')
+    # Generate puzzles by taking random steps backwards from the goal state
+    def random_walk(state, steps, seed=44):
+        if seed is not None:
+            random.seed(seed)
+        puzzle = SlidingPuzzle(len(state) // 4)
+        current_state = state
+        for _ in range(steps):
+            actions = puzzle.get_possible_moves(current_state)
+            action = random.choice(actions)
+            current_state = puzzle.apply_move(current_state, action)
+        return current_state
 
-    sliding_puzzle = SlidingPuzzle(size=4)
+    puzzle_states = [goal_state]
+    for steps in range(10, 31, 10):
+        puzzle_states.append(random_walk(goal_state, steps, seed=44))
 
-    puzzle = torch.tensor(sliding_puzzle.encoder.encode(puzzle_state), dtype=torch.float32)
+    results = []
 
-    print(f'puzzle: {puzzle}')
+    for puzzle_state in puzzle_states:
+        log_to_file(test_results_log_file, f'Puzzle state: {puzzle_state}')
 
-    trained_ffnn.eval()
-    with torch.no_grad():
-        ffnn_predicted_cost_to_goal = trained_ffnn(puzzle).item()
-        print(f'ffn predicted cost to goal: {ffnn_predicted_cost_to_goal}')
+        sliding_puzzle = SlidingPuzzle(size=4, ffnn=trained_ffnn, wunn=trained_wunn)
+        puzzle = torch.tensor(sliding_puzzle.encoder.encode(puzzle_state), dtype=torch.float32)
 
-    ida_star_test = IDAStarTest(domain=sliding_puzzle,
-                            memory_buffer=[],
-                            epsilon=1)
+        # Evaluate FFNN heuristic
+        trained_ffnn.eval()
+        with torch.no_grad():
+            ffnn_predicted_cost_to_goal = trained_ffnn(puzzle).item()
+            log_to_file(test_results_log_file, f'FFNN Predicted cost: {ffnn_predicted_cost_to_goal}')
 
-    #z_score_test = NormalDist(mu=0, sigma=1).inv_cdf(alpha_test)
+        # Adjust cost to avoid division by zero
+        if ffnn_predicted_cost_to_goal == 0:
+            ffnn_predicted_cost_to_goal += 1e-6
 
-    result = ida_star_test.search(puzzle_state, ffnn_predicted_cost_to_goal, t_max=60)
+        # Run IDA* for FFNN
+        start_time_ffnn = time.time()
+        ida_star_test_ffnn = IDAStarTest(domain=sliding_puzzle, memory_buffer=[], epsilon=1)
+        path_ffnn, time_ffnn, cost_ffnn = ida_star_test_ffnn.search(puzzle_state, ffnn_predicted_cost_to_goal, t_max=60)
+        end_time_ffnn = time.time()
 
-    alphas_test = [0.5]
-    for alpha_test in alphas_test:
+        elapsed_time_ffnn = end_time_ffnn - start_time_ffnn
 
-        #TODO : calc using wunn
-        #heuristic = alpha_test * predicted_cost_to_goal
+        # Adjust cost to avoid division by zero
+        if cost_ffnn == 0:
+            cost_ffnn += 1e-6
 
-        ida_star_test = IDAStarTest(domain=sliding_puzzle,
-                                alpha=alpha_test,
-                                memory_buffer=[],
-                                epsilon=1)
+        # Calculate suboptimality for FFNN
+        suboptimality_ffnn = (cost_ffnn / optimal_cost) - 1
 
-        #TODO:
-        #z_score_test = NormalDist(mu=0, sigma=1).inv_cdf(alpha_test)
+        log_to_file(test_results_log_file,
+                    f'FFNN Results - Cost: {cost_ffnn}, '
+                    f'Time: {elapsed_time_ffnn}, Nodes: {ida_star_test_ffnn.generated}, '
+                    f'Path: {path_ffnn}')
 
-        result_wunn = ida_star_test.search(puzzle_state, wunn_predicted_cost_to_goal, t_max=60)
+        results.append({
+            'alpha': 'N/A',  # Single output FFNN has no alpha
+            'time': elapsed_time_ffnn,
+            'generated': ida_star_test_ffnn.generated,
+            'suboptimality': suboptimality_ffnn,
+            'optimal': int(sliding_puzzle.is_goal(path_ffnn[-1])) if path_ffnn else 0
+        })
+
+        # Calculate Manhattan Distance heuristic
+        manhattan_cost = manhattan_distance(puzzle_state, goal_state)
+        log_to_file(test_results_log_file,
+                    f'Manhattan Distance Cost: {manhattan_cost}')
+        start_time_md = time.time()
+        ida_star_test_md = IDAStarTest(domain=sliding_puzzle, memory_buffer=[], epsilon=1)
+        path_md, time_md, cost_md = ida_star_test_md.search(puzzle_state, manhattan_cost, t_max=60)
+        end_time_md = time.time()
+
+        elapsed_time_md = end_time_md - start_time_md
+
+        # Calculate suboptimality for Manhattan Distance
+        suboptimality_md = (cost_md / optimal_cost) - 1
+
+        log_to_file(test_results_log_file,
+                    f'Manhattan Distance Results - Cost: {cost_md}, '
+                    f'Time: {elapsed_time_md}, Nodes: {ida_star_test_md.generated}, '
+                    f'Path: {path_md}')
+
+        results.append({
+            'alpha': 'MD',
+            'time': elapsed_time_md,
+            'generated': ida_star_test_md.generated,
+            'suboptimality': suboptimality_md,
+            'optimal': int(sliding_puzzle.is_goal(path_md[-1])) if path_md else 0
+        })
+
+        # Run IDA* for WUNN with different alpha values
+        for alpha_test in alphas_test:
+            z_score_test = NormalDist(mu=0, sigma=1).inv_cdf(alpha_test)
+
+            trained_wunn.eval()
+            with torch.no_grad():
+                wunn_output = trained_wunn(puzzle, sample=False)
+                wunn_predicted_cost_to_goal = wunn_output[0].item()
+                log_aleatoric_uncertainty = wunn_output[1].item()
+                aleatoric_uncertainty = torch.log1p(torch.exp(torch.tensor(log_aleatoric_uncertainty))).item()
+
+            heuristic_wunn = wunn_predicted_cost_to_goal - z_score_test * aleatoric_uncertainty
+
+            log_to_file(test_results_log_file,
+                        f'WUNN Predicted cost: {wunn_predicted_cost_to_goal}, '
+                        f'Aleatoric Uncertainty: {aleatoric_uncertainty}, '
+                        f'Heuristic: {heuristic_wunn}')
+
+            start_time_wunn = time.time()
+            ida_star_test_wunn = IDAStarTest(domain=sliding_puzzle, memory_buffer=[], epsilon=1)
+            path_wunn, time_wunn, cost_wunn = ida_star_test_wunn.search(puzzle_state, heuristic_wunn, t_max=60)
+            end_time_wunn = time.time()
+
+            elapsed_time_wunn = end_time_wunn - start_time_wunn
+
+            if cost_wunn is not None and cost_ffnn != 0:
+                suboptimality = (cost_wunn / optimal_cost) - 1
+            else:
+                suboptimality = None
+
+            log_to_file(test_results_log_file,
+                        f'WUNN Results - Cost: {cost_wunn}, '
+                        f'Time: {elapsed_time_wunn}, '
+                        f'Nodes: {ida_star_test_wunn.generated}, '
+                        f'Path: {path_wunn}')
+
+            results.append({
+                'alpha': alpha_test,
+                'time': elapsed_time_wunn,
+                'generated': ida_star_test_wunn.generated,
+                'suboptimality': suboptimality,
+                'optimal': int(sliding_puzzle.is_goal(path_wunn[-1])) if path_wunn else 0
+            })
+
+    return results
+
+def average_results(trained_ffnn, trained_wunn, alphas_test, repeats=3):
+    all_results = []
+
+    for _ in range(repeats):
+        results = run_tests(trained_ffnn, trained_wunn, alphas_test)
+        all_results.append(results)
+
+    # Convert the results to a DataFrame and calculate the mean
+    df_all_results = pd.DataFrame([item for sublist in all_results for item in sublist])
+    avg_results = df_all_results.groupby(['alpha']).mean().reset_index()
+
+    return avg_results
+
+trained_ffnn, trained_wunn = run_experiment()
+#alphas_test = [0.95, 0.9, 0.75, 0.5, 0.25, 0.1, 0.05]
+alphas_test = [0.95, 0.05]
+
+average_results = average_results(trained_ffnn, trained_wunn, alphas_test, repeats=2)
+
+print(average_results)
+
+# Save results
+average_results.to_csv('paper_table_1_results.csv', index=False)

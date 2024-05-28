@@ -1,0 +1,10 @@
+Iteration 1/1
+Epoch [1/5000]
+Loss: 1709.5867
+Epoch [2/5000]
+Loss: 1267.7649
+Iteration 1/1
+Epoch [1/5000]
+Loss: 1709.5867
+Epoch [2/5000]
+Loss: 1267.7649
