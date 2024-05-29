@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed May 29 13:03:50 2024
+
+@author: liamc
+"""
+
 import os
 import random
 import time
@@ -15,7 +22,7 @@ from statistics import NormalDist
 if not os.path.exists('logs'):
     os.makedirs('logs')
 
-kappa = 1.5
+kappa = 0.64
 
 # Create log files
 summary_log_file = os.path.join('logs', f'summary_log_kappa_{kappa}.txt')
@@ -225,17 +232,18 @@ class SlidingPuzzle:
 class TwoDim:
     def __init__(self, size):
         self.size = size
-        self.num_inputs = 16 * 2 * 4  # 16 tiles, each encoded with 2 4-bit one-hot vectors
+        # 16 tiles, each encoded with 2 4-bit one-hot vectors
+        self.num_inputs = 16 * 2 * 4  
 
     def index_to_coord(self, index):
-        dim = int(np.sqrt(16))  # For a 15-puzzle, dim should be 4
+        dim = int(np.sqrt(16))
         y = index // dim
         x = index % dim
         return x, y
 
     def encode(self, state):
         dim = int(np.sqrt(len(state)))
-        encoded = np.zeros((16, 8))  # 16 tiles, each with 4-bit one-hot vectors for x and y
+        encoded = np.zeros((16, 8))
         for i, val in enumerate(state):
             if val == 0:
                 continue
@@ -455,9 +463,9 @@ class LearnHeuristicPrac:
         self.beta = beta0
         finished_training = False
 
-        # Training can run for a maximum of 8 hours otherwise stop at end of iteration
+        # Training can run for a maximum of 6 hours otherwise stop at end of iteration
         start_time = time.time()
-        max_training_time = 8 * 3600
+        max_training_time = 6 * 3600
 
         for n in range(numIter):
 
@@ -530,6 +538,7 @@ class LearnHeuristicPrac:
                 elapsed_time = time.time() - start_time
                 if elapsed_time >= max_training_time:
                     log_to_console_and_file(summary_log_file, f'Maximum training time of 8 hours reached.')
+                    finished_training = True
                     break
 
         return self.nnFFNN, self.nnWUNN
@@ -678,7 +687,6 @@ def run_experiment():
     return trained_ffnn, trained_wunn
 
 # Testing models to replicate table 1 in paper
-
 class IDAStarTest:
     def __init__(self, domain, memory_buffer, epsilon):
         self.domain = domain
@@ -691,16 +699,18 @@ class IDAStarTest:
         self.expanded = 0
         self.generated = 0
 
-    def search(self, start_state, heuristic, t_max=None):
+    def search(self, start_state, heuristic_initial, heuristic_func, t_max=None):
         self.start_time = time.time()
-
-        self.bound = heuristic
+        self.bound = heuristic_initial
 
         while True:
             self.minoob = -1
             self.path.clear()
-            goal = self.dfs(start_state, 0, heuristic,  None, t_max)
+            goal = self.dfs(start_state, 0, heuristic_initial, heuristic_func, None, t_max)
             if goal is None:
+                if t_max and (time.time() - self.start_time) > t_max:
+                    # Return None if no solution found
+                    return self.path, time.time() - self.start_time, None
                 return None
             if self.path:
                 break
@@ -709,9 +719,10 @@ class IDAStarTest:
         self.path.reverse()
         elapsed_time = time.time() - self.start_time
         print(f"Elapsed time: {elapsed_time:.2f} seconds")
-        return self.path, elapsed_time, len(self.path) - 1  # Return time and cost to goal
+        # Return time and cost to goal
+        return self.path, elapsed_time, len(self.path) - 1
 
-    def dfs(self, state, cost_so_far, heuristic, pop, t_max):
+    def dfs(self, state, cost_so_far, heuristic, heuristic_func, pop, t_max):
         if t_max and (time.time() - self.start_time) > t_max:
             return None
 
@@ -731,7 +742,9 @@ class IDAStarTest:
                 continue
             self.generated += 1
             next_state = self.domain.apply_move(state, op)
-            goal = self.dfs(next_state, cost_so_far + 1, heuristic, -op, t_max)
+            heuristic_next = heuristic_func(next_state)
+            goal = self.dfs(next_state, cost_so_far + 1, heuristic_next, 
+                            heuristic_func, -op, t_max)
             self.domain.undo_move(state, op)
             if goal:
                 self.path.append(state)
@@ -740,71 +753,92 @@ class IDAStarTest:
                 return None
         return False
 
+def generate_puzzles(num_puzzles, initial_state, max_steps=100, seed=44):
+    random.seed(seed)
+    puzzle = SlidingPuzzle(size=4)
+    puzzles = []
+
+    for _ in range(num_puzzles):
+        state = initial_state
+        for _ in range(random.randint(1, max_steps)):
+            moves = puzzle.get_possible_moves(state)
+            state = puzzle.apply_move(state, random.choice(moves))
+        puzzles.append(state)
+
+    return puzzles
+
+# Check if the solution is optimal
+def is_optimal(path, goal_state):
+    return int(path[-1] == goal_state) if path else 0
+
+def manhattan_distance(state, goal_state):
+    distance = 0
+    size = int(len(state) ** 0.5)
+    for num in range(1, len(state)):
+        current_index = state.index(num)
+        goal_index = goal_state.index(num)
+        current_row, current_col = divmod(current_index, size)
+        goal_row, goal_col = divmod(goal_index, size)
+        distance += abs(current_row - goal_row) + abs(current_col - goal_col)
+    return distance
+
 def run_tests(trained_ffnn, trained_wunn, alphas_test, optimal_cost=53.05):
-    # Define the goal state
+
     goal_state = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0]
 
-    def manhattan_distance(state, goal_state):
-        distance = 0
-        size = int(len(state) ** 0.5)
-        for num in range(1, len(state)):
-            current_index = state.index(num)
-            goal_index = goal_state.index(num)
-            current_row, current_col = divmod(current_index, size)
-            goal_row, goal_col = divmod(goal_index, size)
-            distance += abs(current_row - goal_row) + abs(current_col - goal_col)
-        return distance
-
-    # Generate puzzles by taking random steps backwards from the goal state
-    def random_walk(state, steps, seed=44):
-        if seed is not None:
-            random.seed(seed)
-        puzzle = SlidingPuzzle(len(state) // 4)
-        current_state = state
-        for _ in range(steps):
-            actions = puzzle.get_possible_moves(current_state)
-            action = random.choice(actions)
-            current_state = puzzle.apply_move(current_state, action)
-        return current_state
-
-    puzzle_states = [goal_state]
-    for steps in range(10, 31, 10):
-        puzzle_states.append(random_walk(goal_state, steps, seed=44))
+    # Generate test puzzles
+    num_test_puzzles = 10 # Cannot generate 100 within a reasonable amount 
+    #of time due to issues with learned heuristics
+    test_puzzles = generate_puzzles(num_test_puzzles, goal_state)
 
     results = []
 
-    for puzzle_state in puzzle_states:
-        log_to_file(test_results_log_file, f'Puzzle state: {puzzle_state}')
+    for puzzle_state in test_puzzles:
+        log_to_console_and_file(test_results_log_file, 
+                                f'Puzzle state: {puzzle_state}')
 
-        sliding_puzzle = SlidingPuzzle(size=4, ffnn=trained_ffnn, wunn=trained_wunn)
-        puzzle = torch.tensor(sliding_puzzle.encoder.encode(puzzle_state), dtype=torch.float32)
+        sliding_puzzle = SlidingPuzzle(size=4, 
+                                       ffnn=trained_ffnn, 
+                                       wunn=trained_wunn)
+        
+        puzzle = torch.tensor(sliding_puzzle.encoder.encode(puzzle_state), 
+                              dtype=torch.float32)
 
         # Evaluate FFNN heuristic
         trained_ffnn.eval()
         with torch.no_grad():
             ffnn_predicted_cost_to_goal = trained_ffnn(puzzle).item()
-            log_to_file(test_results_log_file, f'FFNN Predicted cost: {ffnn_predicted_cost_to_goal}')
-
-        # Adjust cost to avoid division by zero
-        if ffnn_predicted_cost_to_goal == 0:
-            ffnn_predicted_cost_to_goal += 1e-6
+            log_to_console_and_file(test_results_log_file, 
+                                    f'FFNN Predicted cost: {ffnn_predicted_cost_to_goal}')
 
         # Run IDA* for FFNN
-        start_time_ffnn = time.time()
-        ida_star_test_ffnn = IDAStarTest(domain=sliding_puzzle, memory_buffer=[], epsilon=1)
-        path_ffnn, time_ffnn, cost_ffnn = ida_star_test_ffnn.search(puzzle_state, ffnn_predicted_cost_to_goal, t_max=60)
-        end_time_ffnn = time.time()
+        heuristic_func_ffnn = lambda state: trained_ffnn(torch.tensor(sliding_puzzle.encoder.encode(state), 
+                                                                      dtype=torch.float32)).item()
+        
+        ida_star_test_ffnn = IDAStarTest(domain=sliding_puzzle, 
+                                         memory_buffer=[], 
+                                         epsilon=1)
+        
+        path_ffnn, time_ffnn, cost_ffnn = ida_star_test_ffnn.search(puzzle_state, 
+                                                                    ffnn_predicted_cost_to_goal, 
+                                                                    heuristic_func_ffnn, 
+                                                                    t_max=60*5)
 
-        elapsed_time_ffnn = end_time_ffnn - start_time_ffnn
+        elapsed_time_ffnn = time_ffnn if time_ffnn is not None else 0
 
-        # Adjust cost to avoid division by zero
-        if cost_ffnn == 0:
-            cost_ffnn += 1e-6
+        if cost_ffnn is None:
+            suboptimality_ffnn = None
+            optimal_ffnn = 0
+        else:
+            # Adjust cost to avoid division by zero
+            if cost_ffnn == 0:
+                cost_ffnn += 1e-6
 
-        # Calculate suboptimality for FFNN
-        suboptimality_ffnn = (cost_ffnn / optimal_cost) - 1
+            # Calculate suboptimality for FFNN
+            suboptimality_ffnn = (cost_ffnn / optimal_cost) - 1
+            optimal_ffnn = is_optimal(path_ffnn, goal_state)
 
-        log_to_file(test_results_log_file,
+        log_to_console_and_file(test_results_log_file,
                     f'FFNN Results - Cost: {cost_ffnn}, '
                     f'Time: {elapsed_time_ffnn}, Nodes: {ida_star_test_ffnn.generated}, '
                     f'Path: {path_ffnn}')
@@ -814,24 +848,34 @@ def run_tests(trained_ffnn, trained_wunn, alphas_test, optimal_cost=53.05):
             'time': elapsed_time_ffnn,
             'generated': ida_star_test_ffnn.generated,
             'suboptimality': suboptimality_ffnn,
-            'optimal': int(sliding_puzzle.is_goal(path_ffnn[-1])) if path_ffnn else 0
+            'optimal': optimal_ffnn
         })
 
         # Calculate Manhattan Distance heuristic
         manhattan_cost = manhattan_distance(puzzle_state, goal_state)
-        log_to_file(test_results_log_file,
-                    f'Manhattan Distance Cost: {manhattan_cost}')
-        start_time_md = time.time()
-        ida_star_test_md = IDAStarTest(domain=sliding_puzzle, memory_buffer=[], epsilon=1)
-        path_md, time_md, cost_md = ida_star_test_md.search(puzzle_state, manhattan_cost, t_max=60)
-        end_time_md = time.time()
 
-        elapsed_time_md = end_time_md - start_time_md
+        heuristic_func_md = lambda state: manhattan_distance(state, goal_state)
+        
+        ida_star_test_md = IDAStarTest(domain=sliding_puzzle, 
+                                       memory_buffer=[], 
+                                       epsilon=1)
+        
+        path_md, time_md, cost_md = ida_star_test_md.search(puzzle_state,
+                                                            manhattan_cost, 
+                                                            heuristic_func_md, 
+                                                            t_max=60*5)
 
-        # Calculate suboptimality for Manhattan Distance
-        suboptimality_md = (cost_md / optimal_cost) - 1
+        elapsed_time_md = time_md if time_md is not None else 0
 
-        log_to_file(test_results_log_file,
+        if cost_md is None:
+            suboptimality_md = None
+            optimal_md = 0
+        else:
+            # Calculate suboptimality for Manhattan Distance
+            suboptimality_md = (cost_md / optimal_cost) - 1
+            optimal_md = is_optimal(path_md, goal_state)
+
+        log_to_console_and_file(test_results_log_file,
                     f'Manhattan Distance Results - Cost: {cost_md}, '
                     f'Time: {elapsed_time_md}, Nodes: {ida_star_test_md.generated}, '
                     f'Path: {path_md}')
@@ -841,7 +885,7 @@ def run_tests(trained_ffnn, trained_wunn, alphas_test, optimal_cost=53.05):
             'time': elapsed_time_md,
             'generated': ida_star_test_md.generated,
             'suboptimality': suboptimality_md,
-            'optimal': int(sliding_puzzle.is_goal(path_md[-1])) if path_md else 0
+            'optimal': optimal_md
         })
 
         # Run IDA* for WUNN with different alpha values
@@ -856,28 +900,37 @@ def run_tests(trained_ffnn, trained_wunn, alphas_test, optimal_cost=53.05):
                 aleatoric_uncertainty = torch.log1p(torch.exp(torch.tensor(log_aleatoric_uncertainty))).item()
 
             heuristic_wunn = wunn_predicted_cost_to_goal - z_score_test * aleatoric_uncertainty
+            
+            heuristic_func_wunn = lambda state: trained_wunn(torch.tensor(sliding_puzzle.encoder.encode(state), 
+                                                                          dtype=torch.float32), sample=False)[0].item() - z_score_test * aleatoric_uncertainty
 
-            log_to_file(test_results_log_file,
+            log_to_console_and_file(test_results_log_file,
                         f'WUNN Predicted cost: {wunn_predicted_cost_to_goal}, '
                         f'Aleatoric Uncertainty: {aleatoric_uncertainty}, '
                         f'Heuristic: {heuristic_wunn}')
 
-            start_time_wunn = time.time()
-            ida_star_test_wunn = IDAStarTest(domain=sliding_puzzle, memory_buffer=[], epsilon=1)
-            path_wunn, time_wunn, cost_wunn = ida_star_test_wunn.search(puzzle_state, heuristic_wunn, t_max=60)
-            end_time_wunn = time.time()
+            ida_star_test_wunn = IDAStarTest(domain=sliding_puzzle, 
+                                             memory_buffer=[], 
+                                             epsilon=1)
+            
+            path_wunn, time_wunn, cost_wunn = ida_star_test_wunn.search(puzzle_state, 
+                                                                        heuristic_wunn, 
+                                                                        heuristic_func_wunn, 
+                                                                        t_max=60*5)
 
-            elapsed_time_wunn = end_time_wunn - start_time_wunn
+            elapsed_time_wunn = time_wunn if time_wunn is not None else 0
 
-            if cost_wunn is not None and cost_ffnn != 0:
-                suboptimality = (cost_wunn / optimal_cost) - 1
-            else:
+            if cost_wunn is None:
                 suboptimality = None
+                optimal_wunn = 0
+            else:
+                # Calculate suboptimality for WUNN
+                suboptimality = (cost_wunn / optimal_cost) - 1
+                optimal_wunn = is_optimal(path_wunn, goal_state)
 
-            log_to_file(test_results_log_file,
+            log_to_console_and_file(test_results_log_file,
                         f'WUNN Results - Cost: {cost_wunn}, '
-                        f'Time: {elapsed_time_wunn}, '
-                        f'Nodes: {ida_star_test_wunn.generated}, '
+                        f'Time: {elapsed_time_wunn}, Nodes: {ida_star_test_wunn.generated}, '
                         f'Path: {path_wunn}')
 
             results.append({
@@ -885,17 +938,20 @@ def run_tests(trained_ffnn, trained_wunn, alphas_test, optimal_cost=53.05):
                 'time': elapsed_time_wunn,
                 'generated': ida_star_test_wunn.generated,
                 'suboptimality': suboptimality,
-                'optimal': int(sliding_puzzle.is_goal(path_wunn[-1])) if path_wunn else 0
+                'optimal': optimal_wunn
             })
 
     return results
 
-def average_results(trained_ffnn, trained_wunn, alphas_test, repeats=3):
+def average_results(trained_ffnn, trained_wunn, alphas_test, repeats=10):
     all_results = []
 
     for _ in range(repeats):
         results = run_tests(trained_ffnn, trained_wunn, alphas_test)
         all_results.append(results)
+
+    log_to_console_and_file(test_results_log_file,
+                            f'RESULTS: {all_results}')
 
     # Convert the results to a DataFrame and calculate the mean
     df_all_results = pd.DataFrame([item for sublist in all_results for item in sublist])
@@ -1030,12 +1086,19 @@ if __name__ == '__main__':
 
     average_results = average_results(trained_ffnn,
                                       trained_wunn,
-                                      alphas_test=[0.95, 0.9, 0.75, 0.5, 0.25, 0.1, 0.05],
-                                      repeats=10)
+                                      alphas_test=[0.95,
+                                                   0.9, 
+                                                   0.75, 
+                                                   0.5, 
+                                                   0.25, 
+                                                   0.1,
+                                                   0.05], 
+                                      repeats=3)  # Cannot repeat 10 tasks 
+    #within a reasonable amount of time due to issues with learned heuristics
 
     print(average_results)
 
-    average_results.to_csv('paper_table_1_results.csv',
+    average_results.to_csv(f'paper_table_1_results_kappa_{kappa}.csv',
                            index=False)
 
     plot_training_logs(kappa)
