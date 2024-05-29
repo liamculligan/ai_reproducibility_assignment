@@ -787,7 +787,7 @@ def run_tests(trained_ffnn, trained_wunn, alphas_test, optimal_cost=53.05):
     goal_state = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0]
 
     # Generate test puzzles
-    num_test_puzzles = 10 # Cannot generate 100 within a reasonable amount 
+    num_test_puzzles = 5 # Cannot generate 100 within a reasonable amount 
     #of time due to issues with learned heuristics
     test_puzzles = generate_puzzles(num_test_puzzles, goal_state)
 
@@ -822,7 +822,7 @@ def run_tests(trained_ffnn, trained_wunn, alphas_test, optimal_cost=53.05):
         path_ffnn, time_ffnn, cost_ffnn = ida_star_test_ffnn.search(puzzle_state, 
                                                                     ffnn_predicted_cost_to_goal, 
                                                                     heuristic_func_ffnn, 
-                                                                    t_max=60*5)
+                                                                    t_max=60)
 
         elapsed_time_ffnn = time_ffnn if time_ffnn is not None else 0
 
@@ -863,7 +863,7 @@ def run_tests(trained_ffnn, trained_wunn, alphas_test, optimal_cost=53.05):
         path_md, time_md, cost_md = ida_star_test_md.search(puzzle_state,
                                                             manhattan_cost, 
                                                             heuristic_func_md, 
-                                                            t_max=60*5)
+                                                            t_max=60)
 
         elapsed_time_md = time_md if time_md is not None else 0
 
@@ -916,7 +916,7 @@ def run_tests(trained_ffnn, trained_wunn, alphas_test, optimal_cost=53.05):
             path_wunn, time_wunn, cost_wunn = ida_star_test_wunn.search(puzzle_state, 
                                                                         heuristic_wunn, 
                                                                         heuristic_func_wunn, 
-                                                                        t_max=60*5)
+                                                                        t_max=60)
 
             elapsed_time_wunn = time_wunn if time_wunn is not None else 0
 
@@ -1093,7 +1093,7 @@ if __name__ == '__main__':
                                                    0.25, 
                                                    0.1,
                                                    0.05], 
-                                      repeats=3)  # Cannot repeat 10 tasks 
+                                      repeats=2)  # Cannot repeat 10 tasks 
     #within a reasonable amount of time due to issues with learned heuristics
 
     print(average_results)

@@ -1,0 +1,3 @@
+Iteration 1/50
+Early stopping at iteration 44
+Iteration 2/50
