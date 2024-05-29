@@ -966,7 +966,6 @@ def plot_training_logs(kappa):
     epistemic_path = f'logs/epistemic_uncertainty_log_kappa_{kappa}.txt'
     aleatoric_path = f'logs/wunn_aleatoric_uncertainty_log_kappa_{kappa}.txt'
     predicted_cost_path = f'logs/ffnn_prediction_log_kappa_{kappa}.txt'
-    kappa = 1.5
 
     ffnn_data = pd.read_csv(ffnn_log_path, delimiter=':', header=None, names=['Metric', 'Value'])
     wunn_data = pd.read_csv(wunn_log_path, delimiter=':', header=None, names=['Metric', 'Value'])
@@ -1098,7 +1097,7 @@ if __name__ == '__main__':
 
     print(average_results)
 
-    average_results.to_csv(f'paper_table_1_results_kappa_{kappa}.csv',
+    average_results.to_csv(f'output/paper_table_1_results_kappa_{kappa}.csv',
                            index=False)
 
     plot_training_logs(kappa)
